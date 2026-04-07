@@ -1,0 +1,23 @@
+Step 4 — Connect to Tableau
+
+Option A: Connect Tableau directly to SQL tables → drill-down and dashboards
+
+Option B: Export cleaned/aggregated tables as CSV → Tableau dashboards
+
+Dashboard Ideas:
+
+Top 10 customers by revenue
+
+Cohort retention heatmaps
+
+Monthly revenue trend with rolling average
+
+Product affinity network (basket analysis)
+
+RFM customer segmentation
+
+Revenue distribution by country with standard deviation
+
+
+3-month rolling average
+20% groups total revenue-percent of total revenue

@@ -1,0 +1,838 @@
+use OnlineRetail;
+
+--Check that all rows were added from known number of rows
+
+select 
+count(*) 
+from onret1;
+
+select 
+count(*) 
+from onret2;
+
+select 
+count(distinct(stockcode)) 
+from onret1;
+
+
+select 
+count(stockcode) 
+from onret1 
+group by stockcode;
+
+select top 100 * from onret1;
+select top 100 * from onret2;
+
+select * from onret1 where invoice like 'C%';
+select * from onret2 where invoice like 'C%';
+
+-- Count how many cancelled orders in each table
+
+select count(*) from onret1 where invoice like 'C%';
+select count(*) from onret2 where invoice like 'C%';
+
+-- delete cancelled orders
+
+delete from onret1 where invoice like 'C%';
+delete from onret2 where invoice like 'C%';
+
+select count(distinct(customer_ID)) from onret1;
+
+select count(distinct(customer_ID)) from onret2;
+
+select count(*) from onret1 where customer_id is null;
+select count(*) from onret2 where customer_id is null;
+
+
+
+
+-- delete records where price=0 but quantity is not negative as these are likely to be erroneous data entries that do not offer any value to insights
+--Also include customer_id = 'guest' (formerly null) further indicating erroneous data entry.
+
+
+
+delete from onret where price = 0 and Quantity > 0 and customer_id = 'guest';
+
+delete from onret where price = 0 and Quantity > 0;
+
+
+select 
+* 
+from onret 
+where price = 0 
+order by customer_ID;
+--merge both tables into one
+drop table onret;
+
+select * 
+into onRet
+from onret1
+union
+select * from onRet2;
+
+
+
+select 
+count(*) 
+from onret 
+where customer_ID is null;
+
+-- There are 234437 instances of null customer_ID so I will replace these with 'Guest'. Too many rows to delete and ignore
+
+alter table onret
+alter column customer_ID varchar(50);
+
+UPDATE onret
+SET customer_ID = 'guest'
+WHERE customer_ID is null;
+
+select * from onret;
+
+select top 10 * from onret order by quantity desc;
+
+
+
+alter table onret1
+alter column quantity int;
+alter table onret2
+alter column quantity int;
+
+
+select * from onret1 where quantity = '80995'
+select * from onret2 where quantity = '80995'
+
+SELECT top 100 * from onret;
+
+--Count how many orders have been duplicated
+
+
+
+
+select count(*) from
+(
+	select 
+        invoice, 
+        StockCode 
+    from onRet 
+    group by invoice, stockcode 
+    having count(*)>1
+)t
+--there are 11045 records duplicated a varying number of times.
+
+
+
+
+
+
+select 
+count(*) cnt, 
+    invoice, 
+    stockcode 
+from onRet 
+group by invoice, stockcode 
+having count(*)>1 
+order by count(*) desc;
+
+
+
+
+
+
+
+
+-- This shows how many times each duplicate has been duplicated
+
+select sum(cnt) from
+(
+    select 
+    count(*) cnt, 
+        invoice, 
+        stockcode 
+    from onRet 
+    group by invoice, stockcode 
+    having count(*)>1
+)t
+
+
+
+
+-- This is total number of duplicates = 22466
+-- 22466 - 11045 = 11421 rows need to be deleted
+
+-- This windowed sub-query finds all the duplicated rows but keeps one record in place. I will use this to delete all but one duplicated order
+
+
+select * from
+(
+    select 
+        invoice, 
+        stockcode, 
+        row_number() over(partition by invoice, stockcode order by country) cnt 
+    from onret
+)t
+where cnt>1;
+-- Backup the main table for now
+
+select * into onRetBackup from onRet;
+
+-- Execute the deletion using a cte on a windowed query using row_number() grouped by the natural key invoiceID and stockcode
+-- and only deleting row numbers > 1 which means you keep one of each duplicated order
+
+with duplicates as
+(
+	select 
+        *, 
+        row_number() over(partition by invoice, stockcode order by invoice) rn 
+    from onRet
+)
+delete from duplicates where rn>1;
+-- Deduplication complete
+
+
+--CODE FROM HERE SHOWS SOME OF THE PROCESSES I WENT THROUGH TO GET TO THE DELETION QUERIES ABOVE. TO...
+select * from
+(
+    select 
+        *, 
+        row_number() over(partition by invoice, stockcode order by invoice) rn 
+    from onRet
+)t
+order by invoice, stockcode, rn desc;
+
+
+
+
+
+select top 1000 count(invoice) cnt, invoice, stockcode from onret group by invoice, stockcode order by 1 desc;
+
+select sum(cnt) from
+(
+select count(invoice) cnt, stockcode from onret group by invoice, stockcode
+)t
+
+
+
+select 
+    count(invoice), 
+    stockcode 
+from onret 
+group by invoice, stockcode 
+order by 1 desc;
+
+
+
+-- identify if there are any repeated orders present for deduplication
+
+
+
+select 
+    count(invoice) cnt, 
+    invoice, 
+    stockcode 
+from onret 
+group by invoice, stockcode 
+having count(invoice)>1 
+order by cnt desc;
+
+
+
+--Count how many duplicated records of sales there are
+
+select sum(cnt) from
+(
+    select 
+        count(invoice) cnt, 
+        stockcode 
+    from onret 
+    group by invoice, stockcode
+)t
+ where cnt>1;
+
+
+
+-- There are 22466 duplicated sales
+
+-- This windowed sub-query finds all the duplicated rows but keeps one record in place. I will use this to delete all but one duplicated order
+
+
+
+select * from
+(
+    select 
+        row_number() over(partition by invoice, stockcode order by country) cnt 
+    from onret
+)t
+where cnt>1;
+
+
+-- Backup the database in this state using a CTAS
+
+select *
+into onRetBACKUP
+from onret;
+
+drop table onretC;
+
+
+select 
+*
+into onRetC
+from
+(
+    select 
+        row_number() over(partition by invoice, stockcode order by country) cnt, 
+        * 
+    from onret
+)t
+where cnt>1;
+
+
+
+select sum(cnt) from
+(
+    select 
+        count(invoice) cnt,
+        invoice, 
+        stockcode 
+    from onretC 
+    group by invoice, stockcode 
+    order by cnt desc
+)t
+where cnt>1 ;
+
+
+
+ select 
+     invoice, 
+     stockcode 
+ from onretC 
+ group by invoice,stockcode 
+ having stockcode = 21791 
+ order by invoice, stockcode;
+
+
+
+ select top 100 * from onRetC;
+
+ --...TO HERE
+
+ --Now I do some transformations to make proceeding caculations easier and for when I connect tables to Tableau
+
+ -- add revenue per invoice column
+
+alter table onret
+add totalRevenue int;
+
+
+
+
+UPDATE onret 
+SET totalrevenue = quantity*price;
+
+
+select top 10 * from onret;
+
+select 
+    *, 
+    sum(quantity*price) totalRevenue 
+into RevenuePerInvoice 
+from onret;
+
+
+
+select top 20 invoice, sum(quantity*price) totalRevenue from onret group by invoice;
+
+select count(distinct(Customer_ID)) from onret;
+
+--create a new table to hold information about each unique customer using CTAS
+
+select
+    customer_ID customer_ID,
+    sum(totalrevenue) totalRevenue,
+    count(distinct invoice) totalOrders,
+    max(invoiceDate) lastOrder,
+    sum(quantity) totalItemsOrdered,
+    sum(totalrevenue)/sum(quantity) averageOrderCost
+into customers
+from onret
+group by Customer_ID;
+
+
+--drop table customers;
+
+WITH cohorts AS (
+  SELECT
+    Customer_ID,
+    cast(MIN(DATEPART(year, InvoiceDate))as varchar) +' '+ cast(MIN(Datepart(month, invoicedate))as varchar) AS CohortMonth
+  FROM onRet
+  GROUP BY Customer_ID
+)
+SELECT
+  CohortMonth,
+  cast(datepart(year,invoiceDate)as varchar)+' '+cast(DATEPART(month, InvoiceDate)as varchar) AS PurchaseMonth,
+  COUNT(DISTINCT a.Customer_ID) AS ActiveCustomers
+FROM onRet a
+JOIN cohorts b on a.Customer_ID = b.Customer_ID
+GROUP BY CohortMonth, cast(datepart(year,invoiceDate)as varchar)+' '+cast(DATEPART(month, InvoiceDate)as varchar)
+order by CohortMonth, PurchaseMonth;
+
+
+
+
+
+
+WITH cohortsYEARS AS (
+  SELECT
+    Customer_ID,
+    MIN(Datepart(month, invoicedate)) AS CohortMonth
+  FROM onRet
+  where datepart(year,InvoiceDate)=2010
+  GROUP BY Customer_ID
+)
+SELECT
+  CohortMonth,
+  DATEPART(month, InvoiceDate) AS PurchaseMonth,
+  COUNT(DISTINCT a.Customer_ID) AS ActiveCustomers
+FROM onRet a
+JOIN cohortsYEARS b on a.Customer_ID = b.Customer_ID
+where datepart(year,invoicedate)=2010
+GROUP BY CohortMonth, DATEPART(month, InvoiceDate)
+order by CohortMonth, PurchaseMonth;
+
+
+
+
+
+
+-- previous CTE tables create cohort retention data however because date_trunc does not work on this version of SQL, months from different years are treated as the same time point
+-- I will therefore create three new tables, one for each year and run the cohort retention analysis on them seperately.
+
+--drop table onret2009
+--drop table onret2010
+--drop table onret2011
+
+select *
+into onret2009
+from onRet
+where datepart(year, invoicedate) = 2009;
+
+select * from onret2009;
+
+
+select *
+into onret2010
+from onRet
+where datepart(year, invoicedate) = 2010;
+
+select *
+into onret2011
+from onRet
+where datepart(year, invoicedate) = 2011;
+
+
+
+WITH cohortsYEARS AS (
+  SELECT
+    Customer_ID,
+    MIN(Datepart(month, invoicedate)) AS CohortMonth
+  FROM onRet2009
+  GROUP BY Customer_ID
+)
+SELECT
+  CohortMonth,
+  DATEPART(month, InvoiceDate) AS PurchaseMonth,
+  COUNT(DISTINCT a.Customer_ID) AS ActiveCustomers
+FROM onRet2009 a
+JOIN cohortsYEARS b on a.Customer_ID = b.Customer_ID
+GROUP BY CohortMonth, DATEPART(month, InvoiceDate)
+order by CohortMonth, PurchaseMonth;
+
+
+
+WITH cohortsYEARS AS (
+  SELECT
+    Customer_ID,
+    MIN(Datepart(month, invoicedate)) AS CohortMonth
+  FROM onret2010
+  GROUP BY Customer_ID
+)
+SELECT
+  CohortMonth,
+  DATEPART(month, InvoiceDate) AS PurchaseMonth,
+  COUNT(DISTINCT a.Customer_ID) AS ActiveCustomers
+FROM onret2010 a
+JOIN cohortsYEARS b on a.Customer_ID = b.Customer_ID
+GROUP BY CohortMonth, DATEPART(month, InvoiceDate)
+order by CohortMonth, PurchaseMonth;
+
+
+
+
+WITH cohortsYEARS AS (
+  SELECT
+    Customer_ID,
+    MIN(Datepart(month, invoicedate)) AS CohortMonth
+  FROM onret2011
+  GROUP BY Customer_ID
+)
+SELECT
+  CohortMonth,
+  DATEPART(month, InvoiceDate) AS PurchaseMonth,
+  COUNT(DISTINCT a.Customer_ID) AS ActiveCustomers
+FROM onret2011 a
+JOIN cohortsYEARS b on a.Customer_ID = b.Customer_ID
+GROUP BY CohortMonth, DATEPART(month, InvoiceDate)
+order by CohortMonth, PurchaseMonth;
+--Or use the original CTEs from the one onRet table and use a where clause to seperate the years
+
+WITH cohortsYEARS AS (
+  SELECT
+    Customer_ID,
+    MIN(Datepart(month, invoicedate)) AS CohortMonth
+  FROM onRet
+  where datepart(year,InvoiceDate)=2009
+  GROUP BY Customer_ID
+)
+SELECT
+  CohortMonth,
+  DATEPART(month, InvoiceDate) AS PurchaseMonth,
+  COUNT(DISTINCT a.Customer_ID) AS ActiveCustomers
+  into cohortRetention2009
+FROM onRet a
+JOIN cohortsYEARS b on a.Customer_ID = b.Customer_ID
+where datepart(year,invoicedate)=2009
+GROUP BY CohortMonth, DATEPART(month, InvoiceDate)
+order by CohortMonth, PurchaseMonth;
+
+
+
+
+
+
+
+
+
+
+
+
+WITH cohortsYEARS AS (
+  SELECT
+    Customer_ID,
+    MIN(Datepart(month, invoicedate)) AS CohortMonth
+  FROM onRet
+  where datepart(year,InvoiceDate)=2010
+  GROUP BY Customer_ID
+)
+SELECT
+  CohortMonth,
+  DATEPART(month, InvoiceDate) AS PurchaseMonth,
+  COUNT(DISTINCT a.Customer_ID) AS ActiveCustomers
+  into cohortRetention2010
+FROM onRet a
+JOIN cohortsYEARS b on a.Customer_ID = b.Customer_ID
+where datepart(year,invoicedate)=2010
+GROUP BY CohortMonth, DATEPART(month, InvoiceDate)
+order by CohortMonth, PurchaseMonth;
+
+
+
+WITH cohortsYEARS AS (
+  SELECT
+    Customer_ID,
+    MIN(Datepart(month, invoicedate)) AS CohortMonth
+  FROM onRet
+  where datepart(year,InvoiceDate)=2011
+  GROUP BY Customer_ID
+)
+SELECT
+  CohortMonth,
+  DATEPART(month, InvoiceDate) AS PurchaseMonth,
+  COUNT(DISTINCT a.Customer_ID) AS ActiveCustomers
+  into cohortRetention2011
+FROM onRet a
+JOIN cohortsYEARS b on a.Customer_ID = b.Customer_ID
+where datepart(year,invoicedate)=2011
+GROUP BY CohortMonth, DATEPART(month, InvoiceDate)
+order by CohortMonth, PurchaseMonth;
+
+--I now have 3 seperate cohort retention tables for each year ready for analysis and insights.
+
+select * from cohortRetention2009 order by CohortMonth, purchasemonth;
+select * from cohortRetention2010 order by CohortMonth, purchasemonth;
+select * from cohortRetention2011 order by CohortMonth, purchasemonth;
+
+
+
+--drop table cohortRetention2009
+--drop table cohortRetention2010  
+--drop table cohortRetention2011
+
+--Here are 2 quick window function queries that 
+
+
+
+with retanalysis as
+(
+    select 
+    *, 
+    first_value(activeCustomers) over(partition by cohortmonth order by purchasemonth) OriginalCohortSize 
+    from cohortRetention2010
+)
+select 
+    *, 
+    (cast(ActiveCustomers as float)/cast(OriginalCohortSize as float))*100 percentRetained
+into CRA2010
+from retanalysis;
+
+with retanalysis as
+(
+    select 
+    *, 
+    first_value(activeCustomers) over(partition by cohortmonth order by purchasemonth) OriginalCohortSize 
+    from cohortRetention2011
+)
+select 
+    *, 
+    (cast(ActiveCustomers as float)/cast(OriginalCohortSize as float))*100 percentRetained
+into CRA2011
+from retanalysis;
+
+
+
+select * from CRA2011;
+select * from CRA2010;
+
+-- TRANSFORMATIONS END HERE AND NOW I DO SOME BUSINESS ANALYSIS OF THE DATA
+
+--Now, here are some business analysis of the data
+
+-- Top 10 customers by lifetime revenue and top 10 revenue
+
+select top 10 
+    customer_ID, 
+    sum(totalrevenue) lifetimeRevenue
+from onret 
+where Customer_ID <> 'guest'
+group by Customer_ID
+order by lifetimeRevenue desc;
+
+
+-- Revenue trend -3-month rolling average.
+
+
+select top 50 * from onret;
+
+select 
+    datepart(year,invoicedate), 
+    datepart(month,invoicedate),
+    sum(totalrevenue)
+from onret 
+group by datepart(year,invoicedate), datepart(month,invoicedate) 
+order by datepart(year,invoicedate), datepart(month,invoicedate);
+
+--Below is the 3-month rolling average calculations done using a sub-query
+-- I will put this into a CTAS to use in Tableau for insights
+
+select
+*,
+avg(totalrevenueforMonth) over(order by yyear, mmonth rows between 2 preceding and current row) ThreeMonthRollingAverage 
+from
+(
+    select 
+        datepart(year,invoicedate)  yyear, 
+        datepart(month,invoicedate) mmonth,
+        sum(totalrevenue) totalrevenueforMonth
+    from onret 
+    group by datepart(year,invoicedate), datepart(month,invoicedate) 
+)t;
+
+select
+rank() over(order by yyear, mmonth) timePoint,
+*,
+avg(totalrevenueforMonth) over(order by yyear, mmonth rows between 2 preceding and current row) ThreeMonthRollingAverage 
+into ThreeMonthRollingAverage
+from
+(
+    select 
+        datepart(year,invoicedate)  yyear, 
+        datepart(month,invoicedate) mmonth,
+        sum(totalrevenue) totalrevenueforMonth
+    from onret 
+    group by datepart(year,invoicedate), datepart(month,invoicedate) 
+)t;
+
+
+-- I have added a timePoint and created a new physical table to use in tableau. 
+-- The timepoint should make it easier for Tableau to create a time series 
+
+select * from ThreeMonthRollingAverage;
+drop table ThreeMonthRollingAverage;
+
+
+
+
+select 
+*, 
+avg(sum(cast(totalrevenue as float))) over(partition by datepart(year,invoicedate), datepart(month,invoicedate) order by datepart(year,invoicedate), datepart(month,invoicedate) rows between 2 preceding and current row) ThreeMonthRollingAverage 
+from onret 
+order by datepart(year,invoicedate), datepart(month,invoicedate)
+;
+
+select * from onret;
+
+
+-- Next I will calculate what percentage of revenue that comes from the top 20% of customers by revenue. I will use ntile(5), a view and a subquery
+
+
+
+create view TRCustomerRevenue as
+(
+    select
+        ntile(5) over(order by totrev desc) trank,
+        *
+        from
+        (
+            select
+                customer_ID,
+                sum(totalrevenue) totrev
+            from onret
+            where customer_ID != 'guest'
+            group by Customer_ID 
+        )t
+)
+
+--I'll use these to check my query
+select sum(totrev) from TRCustomerRevenue where trank =1;
+select sum(totrev) from TRCustomerRevenue;
+
+
+--Query below calculates the answer (as 0.78)
+select top 1 cast((select sum(totrev) from TRCustomerRevenue where trank =1) as float)/cast((select sum(totrev) from TRCustomerRevenue)as float) from TRCustomerRevenue;
+
+--Next I will create a customer lifetime revenue distribution using case on the same view created above
+
+select 
+*,
+case 
+    when totrev between 0 and 999 then '$0-$1000'
+    when totrev between 1000 and 2999 then '$1000-$3000'
+    when totrev between 3000 and 4999 then '$3000-$5000'
+    when totrev between 5000 and 6999 then '$5000-$7000'
+    when totrev between 7000 and 8999 then '$7000-$9000'
+    when totrev between 9000 and 9999 then '$9000-$10000'
+    else '$10000+'
+END revenueBand
+from TRCustomerRevenue;
+
+
+-- I will now do a 90 day churn detection analysis relative to the last purchase date in the dataset
+-- The final table will return all customers, the gap between their last purchase and the latest date on the dataset and a flag if they haven't purchase for over 90 days
+
+
+select
+*,
+case
+    when orderGap>90 then 'churn detected'
+    else 'ok'
+    end churn
+from
+(
+    select
+        customer_ID,
+        DATEDIFF(day, max(invoicedate), (select max(invoicedate) mx from onret)) orderGap
+    from onret
+    group by Customer_ID
+)t
+order by ordergap desc;
+
+-- Here is another version of the above but only retruning customers with churn detected
+
+
+select * from
+(
+    select
+        *,
+        case
+            when orderGap>90 then 'churn detected'
+            else 'ok'
+            end churn
+    from
+(
+select
+    customer_ID,
+    DATEDIFF(day, max(invoicedate), (select max(invoicedate) mx from onret)) orderGap
+from onret
+group by Customer_ID
+)t
+)s
+where ordergap>90
+order by ordergap desc;
+
+
+-- Below I will calculate the average number of days between orders per customer. I have also included the total number of orders per customer
+-- To give more meaning to those averages.
+
+
+
+
+
+
+
+select
+    customer_ID,
+    avg(daysSinceLastOrder) avgDaysBetweenOrders,
+    count(distinct invoice) noOfOrders
+from
+(
+    select
+        *,
+        datediff(day,(lag(invoicedate) over(partition by customer_ID order by invoicedate)),invoicedate) daysSinceLastOrder
+    from onret
+)t
+group by customer_ID
+order by avgDaysBetweenOrders desc;
+
+
+-- Below is an analysis by country.
+-- Avereage revenue per countr
+-- standard deviation of revenue per country
+-- co-efficient of variation within each country
+-- I have used a CTE to first seperate revenue grouped by countries 
+
+with CountryAnalysis as
+(
+    select 
+        country,
+        invoice,
+        sum(quantity*price) tr
+    from onret
+    group by country, invoice
+)
+select
+    country,
+    count(distinct invoice) noOfOrders,
+    avg(tr) avgRevCountry,
+    stdev(tr) stDevCountry,
+    stdev(tr)/avg(tr) CofV
+from CountryAnalysis
+group by country;
+
+
+
+select 
+    country,
+    stdev(totalrevenue) stDevC,
+    avg(totalrevenue) avgRevenue,
+    stdev(totalrevenue)/avg(totalrevenue) CofV
+from onret
+group by country
+
+-- Finally I will create an analysis of the running total of revenue using a sum() window function within a frame and also calculate the 
+-- percentage of total sales to the same point by adding a subqueried column
+
+select 
+    *, 
+    sum(totalrevenue) over(order by invoicedate rows between unbounded preceding and current row) cumulativeRevenue,
+    (sum(totalrevenue) over(order by invoicedate rows between unbounded preceding and current row)*100)/cast((select sum(totalrevenue) from onret)as float) percentageOfTotalRev
+from onret
+order by invoicedate;
